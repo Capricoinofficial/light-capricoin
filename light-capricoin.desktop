@@ -1,0 +1,17 @@
+# If you want light to appear in a linux app launcher ("start menu"), install this by doing:
+# sudo desktop-file-install light-capricoin.desktop
+
+[Desktop Entry]
+Comment=Lightweight Capricoin Client
+Exec=light-capricoin %u
+GenericName[en_US]=Light-Capricoin
+GenericName=Light-Capricoin
+Icon=light-capricoin
+Name[en_US]=Light Capricoin Wallet
+Name=Light Capricoin Wallet
+Categories=Network;
+StartupNotify=false
+Terminal=false
+Type=Application
+MimeType=x-scheme-handler/capricoin;
+
