@@ -20,7 +20,6 @@
 import hashlib
 import base64
 import re
-import sys
 import hmac
 import x11_hash
 
@@ -30,6 +29,10 @@ from util import print_error, InvalidPassword
 import ecdsa
 import aes
 
+TESTNET = False
+PUBKEY_ADDR = 111 if TESTNET else 28
+SCRIPT_ADDR = 196 if TESTNET else 35
+
 ################################## transactions
 
 DUST_THRESHOLD = 0
@@ -37,6 +40,7 @@ DUST_SOFT_LIMIT = 100000
 MIN_RELAY_TX_FEE = 1000
 RECOMMENDED_FEE = 5000
 COINBASE_MATURITY = 100
+COIN = 100000000
 
 # AES encryption
 EncodeAES = lambda secret, s: base64.b64encode(aes.encryptData(secret,s))
@@ -142,8 +146,8 @@ def Hash(x):
     if type(x) is unicode: x=x.encode('utf-8')
     return sha256(sha256(x))
 
-def PoWHash(x):
-    if type(x) is unicode: x=x.encode('utf-8')
+def PoWHash(x):		
+    if type(x) is unicode: x=x.encode('utf-8')		
     return x11_hash.getPoWHash(x)
 
 hash_encode = lambda x: x[::-1].encode('hex')
@@ -176,31 +180,6 @@ def is_old_seed(seed):
 
 
 # pywallet openssl private key implementation
-
-def i2d_ECPrivateKey(pkey, compressed=False):
-    if compressed:
-        key = '3081d30201010420' + \
-              '%064x' % pkey.secret + \
-              'a081a53081a2020101302c06072a8648ce3d0101022100' + \
-              '%064x' % _p + \
-              '3006040100040107042102' + \
-              '%064x' % _Gx + \
-              '022100' + \
-              '%064x' % _r + \
-              '020101a124032200'
-    else:
-        key = '308201130201010420' + \
-              '%064x' % pkey.secret + \
-              'a081a53081a2020101302c06072a8648ce3d0101022100' + \
-              '%064x' % _p + \
-              '3006040100040107044104' + \
-              '%064x' % _Gx + \
-              '%064x' % _Gy + \
-              '022100' + \
-              '%064x' % _r + \
-              '020101a144034200'
-
-    return key.decode('hex') + i2o_ECPublicKey(pkey.pubkey, compressed)
 
 def i2o_ECPublicKey(pubkey, compressed=False):
     # public keys are 65 bytes long (520 bits)
@@ -240,7 +219,7 @@ def public_key_to_bc_address(public_key):
     h160 = hash_160(public_key)
     return hash_160_to_bc_address(h160)
 
-def hash_160_to_bc_address(h160, addrtype = 28):
+def hash_160_to_bc_address(h160, addrtype = PUBKEY_ADDR):
     vh160 = chr(addrtype) + h160
     h = Hash(vh160)
     addr = vh160 + h[0:4]
@@ -328,12 +307,12 @@ def PrivKeyToSecret(privkey):
     return privkey[9:9+32]
 
 
-def SecretToASecret(secret, compressed=False, addrtype=28):
+def SecretToASecret(secret, compressed=False, addrtype=PUBKEY_ADDR):
     vchIn = chr((addrtype+128)&255) + secret
     if compressed: vchIn += '\01'
     return EncodeBase58Check(vchIn)
 
-def ASecretToSecret(key, addrtype=28):
+def ASecretToSecret(key, addrtype=PUBKEY_ADDR):
     vch = DecodeBase58Check(key)
     if vch and vch[0] == chr((addrtype+128)&255):
         return vch[1:]
@@ -350,10 +329,6 @@ def regenerate_key(sec):
 
 def GetPubKey(pubkey, compressed=False):
     return i2o_ECPublicKey(pubkey, compressed)
-
-
-def GetPrivKey(pkey, compressed=False):
-    return i2d_ECPrivateKey(pkey, compressed)
 
 
 def GetSecret(pkey):
@@ -386,12 +361,13 @@ def is_valid(addr):
 
 def is_address(addr):
     ADDRESS_RE = re.compile('[1-9A-HJ-NP-Za-km-z]{26,}\\Z')
-    if not ADDRESS_RE.match(addr): return False
+    if not ADDRESS_RE.match(addr):
+        return False
     try:
         addrtype, h = bc_address_to_hash_160(addr)
     except Exception:
-	    return False
-    if addrtype not in [28, 35]:
+        return False
+    if addrtype not in [PUBKEY_ADDR, PUBKEY_ADDR]:
         return False
     return addr == hash_160_to_bc_address(h, addrtype)
 
@@ -510,29 +486,27 @@ class EC_KEY(object):
     def get_public_key(self, compressed=True):
         return point_to_ser(self.pubkey.point, compressed).encode('hex')
 
-    def sign(self, msg_hash):
-        private_key = ecdsa.SigningKey.from_secret_exponent(self.secret, curve = SECP256k1)
-        public_key = private_key.get_verifying_key()
-        signature = private_key.sign_digest_deterministic(msg_hash, hashfunc=hashlib.sha256, sigencode = ecdsa.util.sigencode_string)
-        assert public_key.verify_digest(signature, msg_hash, sigdecode = ecdsa.util.sigdecode_string)
-        return signature
-
     def sign_message(self, message, compressed, address):
-        signature = self.sign(Hash(msg_magic(message)))
+        private_key = ecdsa.SigningKey.from_secret_exponent( self.secret, curve = SECP256k1 )
+        public_key = private_key.get_verifying_key()
+        signature = private_key.sign_digest_deterministic( Hash( msg_magic(message) ), hashfunc=hashlib.sha256, sigencode = ecdsa.util.sigencode_string )
+        assert public_key.verify_digest( signature, Hash( msg_magic(message) ), sigdecode = ecdsa.util.sigdecode_string)
         for i in range(4):
-            sig = chr(27 + i + (4 if compressed else 0)) + signature
+            sig = base64.b64encode( chr(27 + i + (4 if compressed else 0)) + signature )
             try:
-                self.verify_message(address, sig, message)
+                self.verify_message( address, sig, message)
                 return sig
             except Exception:
                 continue
         else:
             raise Exception("error: cannot sign message")
 
+
     @classmethod
-    def verify_message(self, address, sig, message):
-        if len(sig) != 65:
-            raise Exception("Wrong encoding")
+    def verify_message(self, address, signature, message):
+        sig = base64.b64decode(signature)
+        if len(sig) != 65: raise Exception("Wrong encoding")
+
         nV = ord(sig[0])
         if nV < 27 or nV >= 35:
             raise Exception("Bad encoding")
@@ -541,15 +515,16 @@ class EC_KEY(object):
             nV -= 4
         else:
             compressed = False
-        recid = nV - 27
 
-        h = Hash(msg_magic(message))
-        public_key = MyVerifyingKey.from_signature(sig[1:], recid, h, curve = SECP256k1)
+        recid = nV - 27
+        h = Hash( msg_magic(message) )
+        public_key = MyVerifyingKey.from_signature( sig[1:], recid, h, curve = SECP256k1 )
+
         # check public key
-        public_key.verify_digest(sig[1:], h, sigdecode = ecdsa.util.sigdecode_string)
-        pubkey = point_to_ser(public_key.pubkey.point, compressed)
+        public_key.verify_digest( sig[1:], h, sigdecode = ecdsa.util.sigdecode_string)
+
         # check that we get the original signing address
-        addr = public_key_to_bc_address(pubkey)
+        addr = public_key_to_bc_address( point_to_ser(public_key.pubkey.point, compressed) )
         if address != addr:
             raise Exception("Bad signature")
 
@@ -680,7 +655,6 @@ TESTNET_HEADER_PUB = "043587cf"
 BITCOIN_HEADERS = (BITCOIN_HEADER_PUB, BITCOIN_HEADER_PRIV)
 TESTNET_HEADERS = (TESTNET_HEADER_PUB, TESTNET_HEADER_PRIV)
 
-
 def _get_headers(testnet):
     """Returns the correct headers for either testnet or bitcoin, in the form
     of a 2-tuple, like (public, private)."""
@@ -749,12 +723,6 @@ def bip32_root(seed, testnet=False):
     xpub = (header_pub + "00" + "00000000" + "00000000").decode("hex") + master_c + cK
     return EncodeBase58Check(xprv), EncodeBase58Check(xpub)
 
-def xpub_from_pubkey(cK, testnet=False):
-    header_pub, header_priv = _get_headers(testnet)
-    assert cK[0] in ['\x02','\x03']
-    master_c = chr(0)*32
-    xpub = (header_pub + "00" + "00000000" + "00000000").decode("hex") + master_c + cK
-    return EncodeBase58Check(xpub)
 
 def bip32_private_derivation(xprv, branch, sequence, testnet=False):
     assert sequence.startswith(branch)
