@@ -20,6 +20,7 @@
 import hashlib
 import base64
 import re
+import sys
 import hmac
 import x11_hash
 
@@ -40,7 +41,6 @@ DUST_SOFT_LIMIT = 100000
 MIN_RELAY_TX_FEE = 1000
 RECOMMENDED_FEE = 5000
 COINBASE_MATURITY = 100
-COIN = 100000000
 
 # AES encryption
 EncodeAES = lambda secret, s: base64.b64encode(aes.encryptData(secret,s))
@@ -146,8 +146,8 @@ def Hash(x):
     if type(x) is unicode: x=x.encode('utf-8')
     return sha256(sha256(x))
 
-def PoWHash(x):		
-    if type(x) is unicode: x=x.encode('utf-8')		
+def PoWHash(x):
+    if type(x) is unicode: x=x.encode('utf-8')
     return x11_hash.getPoWHash(x)
 
 hash_encode = lambda x: x[::-1].encode('hex')
@@ -180,6 +180,31 @@ def is_old_seed(seed):
 
 
 # pywallet openssl private key implementation
+
+def i2d_ECPrivateKey(pkey, compressed=False):
+    if compressed:
+        key = '3081d30201010420' + \
+              '%064x' % pkey.secret + \
+              'a081a53081a2020101302c06072a8648ce3d0101022100' + \
+              '%064x' % _p + \
+              '3006040100040107042102' + \
+              '%064x' % _Gx + \
+              '022100' + \
+              '%064x' % _r + \
+              '020101a124032200'
+    else:
+        key = '308201130201010420' + \
+              '%064x' % pkey.secret + \
+              'a081a53081a2020101302c06072a8648ce3d0101022100' + \
+              '%064x' % _p + \
+              '3006040100040107044104' + \
+              '%064x' % _Gx + \
+              '%064x' % _Gy + \
+              '022100' + \
+              '%064x' % _r + \
+              '020101a144034200'
+
+    return key.decode('hex') + i2o_ECPublicKey(pkey.pubkey, compressed)
 
 def i2o_ECPublicKey(pubkey, compressed=False):
     # public keys are 65 bytes long (520 bits)
@@ -331,6 +356,10 @@ def GetPubKey(pubkey, compressed=False):
     return i2o_ECPublicKey(pubkey, compressed)
 
 
+def GetPrivKey(pkey, compressed=False):
+    return i2d_ECPrivateKey(pkey, compressed)
+
+
 def GetSecret(pkey):
     return ('%064x' % pkey.secret).decode('hex')
 
@@ -361,13 +390,12 @@ def is_valid(addr):
 
 def is_address(addr):
     ADDRESS_RE = re.compile('[1-9A-HJ-NP-Za-km-z]{26,}\\Z')
-    if not ADDRESS_RE.match(addr):
-        return False
+    if not ADDRESS_RE.match(addr): return False
     try:
         addrtype, h = bc_address_to_hash_160(addr)
     except Exception:
-        return False
-    if addrtype not in [PUBKEY_ADDR, PUBKEY_ADDR]:
+	    return False
+    if addrtype not in [PUBKEY_ADDR, SCRIPT_ADDR]:
         return False
     return addr == hash_160_to_bc_address(h, addrtype)
 
@@ -655,6 +683,7 @@ TESTNET_HEADER_PUB = "043587cf"
 BITCOIN_HEADERS = (BITCOIN_HEADER_PUB, BITCOIN_HEADER_PRIV)
 TESTNET_HEADERS = (TESTNET_HEADER_PUB, TESTNET_HEADER_PRIV)
 
+
 def _get_headers(testnet):
     """Returns the correct headers for either testnet or bitcoin, in the form
     of a 2-tuple, like (public, private)."""
@@ -723,6 +752,12 @@ def bip32_root(seed, testnet=False):
     xpub = (header_pub + "00" + "00000000" + "00000000").decode("hex") + master_c + cK
     return EncodeBase58Check(xprv), EncodeBase58Check(xpub)
 
+def xpub_from_pubkey(cK, testnet=False):
+    header_pub, header_priv = _get_headers(testnet)
+    assert cK[0] in ['\x02','\x03']
+    master_c = chr(0)*32
+    xpub = (header_pub + "00" + "00000000" + "00000000").decode("hex") + master_c + cK
+    return EncodeBase58Check(xpub)
 
 def bip32_private_derivation(xprv, branch, sequence, testnet=False):
     assert sequence.startswith(branch)

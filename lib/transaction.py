@@ -494,6 +494,7 @@ class Transaction:
         d = deserialize(self.raw)
         self.inputs = d['inputs']
         self.outputs = [(x['type'], x['address'], x['value']) for x in d['outputs']]
+        self.nTime = d['nTime']
         self.locktime = d['lockTime']
 
     @classmethod
@@ -504,9 +505,9 @@ class Transaction:
         self.locktime = locktime
         print("from_io")
         if nTime == 0:
-            self.time = int(time.time()) # bitspill
+            self.nTime = int(time.time()) # bitspill
         else:
-            self.time = nTime
+            self.nTime = nTime
         #self.raw = self.serialize()
         return self
 
@@ -636,10 +637,10 @@ class Transaction:
     def serialize(self, for_sig=None):
         inputs = self.inputs
         outputs = self.outputs
-        time = self.time # bitspill
-        print("Serializing transaction: time: %d"%time)
+        nTime = self.nTime # bitspill
+        print("Serializing transaction: time: %d"%nTime)
         s  = int_to_hex(1,4)                                         # version
-        s += int_to_hex(time,4)   # bitspill                         # nTime
+        s += int_to_hex(nTime,4)   # bitspill                         # nTime
         s += var_int( len(inputs) )                                  # number of inputs
         for i, txin in enumerate(inputs):
             s += txin['prevout_hash'].decode('hex')[::-1].encode('hex')   # prev hash
